@@ -18,6 +18,10 @@ jobs:
         run: flutter create --platforms=android --project-name mr_chat --org com.mrchat .
       - name: Set app name
         run: sed -i 's/android:label="[^"]*"/android:label="Mr Chat"/' android/app/src/main/AndroidManifest.xml
+      - name: Set minSdk 23 for Firebase
+        run: |
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
