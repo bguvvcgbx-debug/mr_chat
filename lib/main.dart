@@ -8,6 +8,9 @@ const kBlack = Color(0xFF000000);
 const kPanel = Color(0xFF0E1320);
 const kLine = Color(0xFF1F2A44);
 
+/// Firestore database named "default" (not "(default)").
+late final FirebaseFirestore fs;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -19,6 +22,8 @@ Future<void> main() async {
       storageBucket: 'mr-chat-a083b.firebasestorage.app',
     ),
   );
+  fs = FirebaseFirestore.instanceFor(
+      app: Firebase.app(), databaseId: 'default');
   runApp(const MrChatApp());
 }
 
@@ -120,7 +125,7 @@ class AuthGate extends StatelessWidget {
         final user = snap.data;
         if (user == null) return const AuthScreen();
         final name = (user.email ?? '').split('@').first;
-        return ChatsScreen(me: name);
+        return ChatsScreen(key: ValueKey(user.uid), me: name, uid: user.uid);
       },
     );
   }
@@ -159,13 +164,8 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       final email = '$u@mrchat.app';
       if (_creating) {
-        final cred = await FirebaseAuth.instance
+        await FirebaseAuth.instance
             .createUserWithEmailAndPassword(email: email, password: p);
-        await FirebaseFirestore.instance.collection('users').doc(u).set({
-          'username': u,
-          'uid': cred.user!.uid,
-          'created': FieldValue.serverTimestamp(),
-        });
       } else {
         await FirebaseAuth.instance
             .signInWithEmailAndPassword(email: email, password: p);
@@ -279,11 +279,33 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 }
 
-class ChatsScreen extends StatelessWidget {
+class ChatsScreen extends StatefulWidget {
   final String me;
-  const ChatsScreen({super.key, required this.me});
+  final String uid;
+  const ChatsScreen({super.key, required this.me, required this.uid});
 
-  Future<void> _newChat(BuildContext context) async {
+  @override
+  State<ChatsScreen> createState() => _ChatsScreenState();
+}
+
+class _ChatsScreenState extends State<ChatsScreen> {
+  String get me => widget.me;
+
+  @override
+  void initState() {
+    super.initState();
+    _saveProfile();
+  }
+
+  /// Makes sure this username is listed so other people can find it.
+  Future<void> _saveProfile() async {
+    try {
+      await fs.collection('users').doc(me).set(
+          {'username': me, 'uid': widget.uid}, SetOptions(merge: true));
+    } catch (_) {}
+  }
+
+  Future<void> _newChat() async {
     final ctl = TextEditingController();
     final other = await showDialog<String>(
       context: context,
@@ -310,18 +332,15 @@ class ChatsScreen extends StatelessWidget {
     );
     if (other == null || other.isEmpty) return;
     if (other == me) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("That's you!")));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text("That's you!")));
       }
       return;
     }
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(other)
-          .get();
-      if (!context.mounted) return;
+      final doc = await fs.collection('users').doc(other).get();
+      if (!mounted) return;
       if (!doc.exists) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('No user named @$other')));
@@ -330,7 +349,7 @@ class ChatsScreen extends StatelessWidget {
       Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => ChatScreen(me: me, other: other)));
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
@@ -339,7 +358,7 @@ class ChatsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stream = FirebaseFirestore.instance
+    final stream = fs
         .collection('chats')
         .where('members', arrayContains: me)
         .snapshots();
@@ -414,7 +433,7 @@ class ChatsScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: kBlue,
-        onPressed: () => _newChat(context),
+        onPressed: _newChat,
         child: const Icon(Icons.edit, color: Colors.white),
       ),
     );
@@ -439,9 +458,8 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty) return;
     _ctl.clear();
     try {
-      final db = FirebaseFirestore.instance;
-      final chat = db.collection('chats').doc(_id);
-      final batch = db.batch();
+      final chat = fs.collection('chats').doc(_id);
+      final batch = fs.batch();
       batch.set(
           chat,
           {
@@ -466,7 +484,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final stream = FirebaseFirestore.instance
+    final stream = fs
         .collection('chats')
         .doc(_id)
         .collection('messages')
