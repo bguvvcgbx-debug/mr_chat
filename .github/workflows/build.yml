@@ -32,7 +32,18 @@ jobs:
           echo "$KS" | base64 -d > ~/.android/debug.keystore
           keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey
       - run: flutter pub get
-      - run: flutter build apk --release
+      - name: Build release APK
+        run: |
+          flutter build apk --release 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo ""
+            echo "=========== ERROR SUMMARY ==========="
+            grep -n -E "^e: |error:|Error:|What went wrong|Caused by|Could not|Execution failed|Unresolved|incompatible|requires" build.log | tail -40
+            echo "=========== LAST 40 LINES ==========="
+            tail -40 build.log
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: mr-chat-apk
